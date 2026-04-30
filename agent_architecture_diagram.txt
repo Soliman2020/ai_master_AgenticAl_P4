@@ -1,0 +1,145 @@
+
+================================================================================
+        BEAVER'S CHOICE PAPER COMPANY - MULTI-AGENT SYSTEM ARCHITECTURE
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              CUSTOMER LAYER                                   │
+│  ┌─────────────────┐                                                         │
+│  │  Customer Req   │ ←── Text-based inquiry (e.g., "I need 500 sheets...")   │
+│  └────────┬────────┘                                                         │
+└───────────┼─────────────────────────────────────────────────────────────────┘
+            │
+            │ ① Customer Inquiry
+            ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          ORCHESTRATOR AGENT                                   │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │  Responsibilities:                                                   │  │
+│  │  • Receive and parse customer requests                                  │  │
+│  │  • Delegate tasks to appropriate worker agents                          │  │
+│  │  • Coordinate data flow between agents                                  │  │
+│  │  • Synthesize final response to customer                                │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
+│           │                    │                    │                         │
+│           │ ④a Check Stock    │ ④b Generate Quote  │ ④c Process Order      │
+│           ▼                    ▼                    ▼                        │
+└───────────┼────────────────────┼────────────────────┼─────────────────────────┘
+            │                    │                    │
+┌───────────┼────────────────────┼────────────────────┼─────────────────────────┐
+│           │      WORKER AGENTS │                    │                         │
+│           │                    │                    │                         │
+│  ┌────────┴───────┐  ┌─────────┴───────┐  ┌────────┴───────┐                 │
+│  │ INVENTORY     │  │ QUOTING         │  │ ORDER           │                 │
+│  │ AGENT         │  │ AGENT           │  │ FULFILLMENT     │                 │
+│  ├───────────────┤  ├─────────────────┤  ├─────────────────┤                 │
+│  │ Tools:        │  │ Tools:          │  │ Tools:          │                 │
+│  │ • check_stock │  │ • generate_quote│  │ • process_order │                 │
+│  │ • get_all_    │  │ • search_       │  │ • create_       │                 │
+│  │   inventory   │  │   quote_history │  │   transaction   │                 │
+│  │ • get_stock   │  │ • apply_        │  │ • update_       │                 │
+│  │   _level      │  │   discounts     │  │   inventory     │                 │
+│  │ • assess_     │  │ • get_supplier_ │  │ • generate_     │                 │
+│  │   restock     │  │   delivery_date │  │   financial_    │                 │
+│  └───────┬───────┘  └────────┬────────┘  │   report       │                 │
+│          │                   │            └────────┬───────┘                 │
+│          └───────────────────┼────────────────────┘                          │
+│                              │                                               │
+│                              ▼                                               │
+└──────────────────────────────┼────────────────────────────────────────────────┘
+                               │
+┌──────────────────────────────┼────────────────────────────────────────────────┐
+│                         DATABASE LAYER                                        │
+│                                                                               │
+│   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
+│   │  Inventory   │  │   Quotes     │  │ Transactions │  │Quote Requests│       │
+│   ├──────────────┤  ├──────────────┤  ├──────────────┤  ├──────────────┤       │
+│   │ current_stock│  │ total_amount│  │ stock_orders│  │   response   │       │
+│   │ min_stock    │  │ quote_      │  │ sales        │  │    job       │       │
+│   │ unit_price   │  │ explanation │  │ units        │  │   event      │       │
+│   │ category     │  │ job_type    │  │ price        │  │              │       │
+│   └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘       │
+│                                                                               │
+│         ▲                 ▲                  ▲                  ▲              │
+│         │                 │                  │                  │              │
+│   get_stock_level   search_quote    create_transaction  reference            │
+│   get_all_inventory history        generate_financial     data                │
+│                              _report                                          │
+└────────────────────────────────────────────────────────────────────────────────┘
+                               │
+┌───────────────────────────────┼────────────────────────────────────────────────┐
+│                               │    EXTERNAL SERVICES                           │
+│                               ▼                                                 │
+│                    ┌──────────────────────┐                                    │
+│                    │   Supplier System    │  ← get_supplier_delivery_date()    │
+│                    │  Delivery lead time:  │    ≤10: same day                   │
+│                    │  • 1-10 units: 0d    │    11-100: 1 day                   │
+│                    │  • 11-100 units: 1d   │    101-1000: 4 days                │
+│                    │  • 101-1000 units: 4d │    >1000: 7 days                  │
+│                    │  • >1000 units: 7d    │                                    │
+│                    └──────────────────────┘                                    │
+│                                                                                │
+│                    ┌──────────────────────┐                                    │
+│                    │   LLM (GPT-4)        │  ← Intent analysis, text generation │
+│                    │   OpenAI API         │    Customer request parsing        │
+│                    └──────────────────────┘    Response synthesis             │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+================================================================================
+                              DATA FLOW SEQUENCE
+================================================================================
+
+Step 1: Customer sends text-based request
+         ↓
+Step 2: Orchestrator receives request → sends to LLM for intent analysis
+         ↓
+Step 3: LLM returns parsed request (items, quantities, event type, etc.)
+         ↓
+Step 4a: Orchestrator delegates to INVENTORY AGENT
+         → Checks stock levels via get_all_inventory(), get_stock_level()
+         → Assesses if restocking is needed
+         ↓
+Step 4b: Orchestrator delegates to QUOTING AGENT
+         → Searches historical quotes via search_quote_history()
+         → Calculates pricing with bulk discounts
+         → Checks delivery timeline via get_supplier_delivery_date()
+         ↓
+Step 4c: If stock available, delegates to ORDER FULFILLMENT
+         → Creates transaction via create_transaction()
+         → Updates inventory
+         → Generates financial report via generate_financial_report()
+         ↓
+Step 5: Worker agents return results to Orchestrator
+         ↓
+Step 6: Orchestrator synthesizes final response → Customer
+
+================================================================================
+                           HELPER FUNCTIONS MAPPING
+================================================================================
+
+┌─────────────────────────────┬───────────────────────────────────────────────┐
+│       Helper Function       │              Usage in Agents                   │
+├─────────────────────────────┼───────────────────────────────────────────────┤
+│ init_database()             │ Initialize DB with inventory & quotes         │
+│ get_all_inventory(date)     │ Inventory Agent: Get all stock levels         │
+│ get_stock_level(item, date) │ Inventory Agent: Check specific item stock     │
+│ get_cash_balance(date)      │ Fulfillment Agent: Verify payment capacity    │
+│ get_supplier_delivery_date() │ Quoting Agent: Estimate delivery lead time   │
+│ search_quote_history(terms) │ Quoting Agent: Find similar historical quotes │
+│ create_transaction(...)     │ Fulfillment Agent: Record sales/stock orders │
+│ generate_financial_report()  │ Fulfillment Agent: Report final state         │
+└─────────────────────────────┴───────────────────────────────────────────────┘
+
+================================================================================
+                           CONSTRAINTS & REQUIREMENTS
+================================================================================
+
+• Maximum 5 agents total (1 orchestrator + 4 workers maximum)
+• All communication must be text-based
+• Must use smolagents, pydantic-ai, or npcsh framework
+• All 7 helper functions must be utilized in at least one tool
+• Quotes must include bulk discounts
+• Exact item names from paper_supplies must be used
+• Dates must be included in inter-agent communication
+
+================================================================================

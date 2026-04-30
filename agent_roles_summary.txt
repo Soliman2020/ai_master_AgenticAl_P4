@@ -1,0 +1,113 @@
+
+================================================================================
+                    AGENT ROLES AND RESPONSIBILITIES
+================================================================================
+
+1. ORCHESTRATOR AGENT
+   ────────────────────
+   Primary Role: Central coordinator and task dispatcher
+
+   Responsibilities:
+   • Receive customer text requests
+   • Parse and interpret customer intent (via LLM)
+   • Determine which worker agents need to be invoked
+   • Coordinate parallel and sequential agent execution
+   • Aggregate results from worker agents
+   • Generate final customer-facing response
+
+   Input: Customer text request (with date)
+   Output: Synthesized response (quote confirmation, order status, etc.)
+
+
+2. INVENTORY AGENT
+   ─────────────────
+   Primary Role: Stock management and restocking decisions
+
+   Tools:
+   • get_all_inventory(date) → Dict of {item: stock_level}
+   • get_stock_level(item_name, date) → DataFrame with current_stock
+   • check_availability(requested_items) → Availability report
+   • assess_restock_needs(stock_levels) → Reorder recommendations
+
+   Responsibilities:
+   • Query current inventory levels from SQLite database
+   • Determine if requested items are in stock
+   • Identify items below minimum stock threshold
+   • Recommend restocking quantities
+   • Flag items that cannot be fulfilled
+
+   Input: List of requested items and quantities
+   Output: Stock availability report with quantities
+
+
+3. QUOTING AGENT
+   ───────────────
+   Primary Role: Price generation with strategic discounting
+
+   Tools:
+   • search_quote_history(search_terms, limit) → Historical quotes
+   • calculate_price(item, quantity, unit_price) → Line item cost
+   • apply_bulk_discount(subtotal, quantity) → Discounted price
+   • get_supplier_delivery_date(request_date, quantity) → Delivery date
+
+   Responsibilities:
+   • Search historical quotes for similar requests
+   • Calculate base pricing from unit prices
+   • Apply bulk discounts strategically (10-20% typical)
+   • Estimate delivery dates based on quantity
+   • Generate itemized quote with explanation
+
+   Input: Customer request with items, quantities, event type
+   Output: Detailed quote with pricing and delivery timeline
+
+
+4. ORDER FULFILLMENT AGENT
+   ─────────────────────────
+   Primary Role: Transaction processing and inventory updates
+
+   Tools:
+   • create_transaction(item_name, type, qty, price, date) → Transaction ID
+   • get_cash_balance(date) → Current cash float
+   • generate_financial_report(date) → Full financial summary
+   • validate_order(inventory_check, cash_check) → Validation result
+
+   Responsibilities:
+   • Validate order against inventory and cash constraints
+   • Create sales transaction records
+   • Update inventory (decrement stock)
+   • Process payment/cash operations
+   • Generate financial reports
+   • Handle order rejections with reasons
+
+   Input: Approved quote, inventory validation result
+   Output: Transaction confirmation, updated financial state
+
+
+================================================================================
+                         DATA DEPENDENCIES MATRIX
+================================================================================
+
+                    ┌─────────────┬─────────────┬─────────────┬─────────────┐
+                    │ Orchestrator│  Inventory  │   Quoting   │  Fulfillment│
+    ────────────────┼─────────────┼─────────────┼─────────────┼─────────────┤
+    Customer Req    │     ←←←     │             │             │             │
+    ────────────────┼─────────────┼─────────────┼─────────────┼─────────────┤
+    Inventory DB    │             │    ←←←      │      →      │      →      │
+    ────────────────┼─────────────┼─────────────┼─────────────┼─────────────┤
+    Quotes DB       │             │             │     ←←←     │             │
+    ────────────────┼─────────────┼─────────────┼─────────────┼─────────────┤
+    Transactions    │             │             │             │     ←←←     │
+    ────────────────┼─────────────┼─────────────┼─────────────┼─────────────┤
+    Quote Requests  │             │             │      →      │             │
+    ────────────────┼─────────────┼─────────────┼─────────────┼─────────────┤
+    Supplier API    │             │             │     ←→      │             │
+    ────────────────┼─────────────┼─────────────┼─────────────┼─────────────┤
+    LLM (GPT-4)     │     ←→      │             │             │             │
+    ────────────────┼─────────────┼─────────────┼─────────────┼─────────────┤
+    Cash Balance    │             │             │             │     ←←←     │
+    ────────────────┼─────────────┼─────────────┼─────────────┼─────────────┤
+
+    ←←← = Primary data source/consumer
+    → = Reads from / writes to
+
+================================================================================
