@@ -1,0 +1,9 @@
+# environment variables
+.env
+
+# virtual environment
+agentic_p4
+
+# markdown files
+*.md
+
