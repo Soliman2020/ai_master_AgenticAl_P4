@@ -2,15 +2,21 @@ import pandas as pd
 import numpy as np
 import os
 import time
-import dotenv
+from dotenv import load_dotenv
 import ast
 from sqlalchemy.sql import text
 from datetime import datetime, timedelta
 from typing import Dict, List, Union
 from sqlalchemy import create_engine, Engine
+from openai import OpenAI
+
+# Load environment variables
+load_dotenv()
+
+openai_api_key = os.getenv("OPENAI_API_KEY")
 
 # Create an SQLite database
-db_engine = create_engine("sqlite:///munder_difflin.db")
+db_engine = create_engine("sqlite:///paper_company_db.db")
 
 # List containing the different kinds of papers 
 paper_supplies = [
@@ -126,9 +132,11 @@ def generate_sample_inventory(paper_supplies: list, coverage: float = 0.4, seed:
     # Return inventory as a pandas DataFrame
     return pd.DataFrame(inventory)
 
-def init_database(db_engine: Engine, seed: int = 137) -> Engine:    
+def init_database(db_engine: Engine = None, seed: int = 137) -> Engine:
+    if db_engine is None:
+        db_engine = create_engine("sqlite:///paper_company_db.db")
     """
-    Set up the Munder Difflin database with all required tables and initial records.
+    Set up the Paper Company database with all required tables and initial records.
 
     This function performs the following tasks:
     - Creates the 'transactions' table for logging stock orders and sales
