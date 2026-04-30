@@ -2,11 +2,17 @@
 Agent Workflow Diagram Generator
 Creates a visual architecture diagram for the Beaver's Choice Paper Company multi-agent system
 using NetworkX and matplotlib.
+
+Fixed issues:
+- Arrows now properly connect to node boundaries
+- Edge labels positioned to avoid overlapping
 """
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+import matplotlib.lines as mlines
 import networkx as nx
+import numpy as np
 
 def create_agent_workflow_diagram():
     # Create directed graph
@@ -14,177 +20,130 @@ def create_agent_workflow_diagram():
 
     # Define node categories with styling
     node_styles = {
-        'customer': {'color': '#FFB6C1', 'shape': 's'},      # Pink square
-        'orchestrator': {'color': '#87CEEB', 'shape': 'o'}, # Sky blue circle
-        'agent': {'color': '#98FB98', 'shape': 'o'},        # Pale green circle
-        'database': {'color': '#DDA0DD', 'shape': 'd'},     # Plum diamond
-        'external': {'color': '#F0E68C', 'shape': 's'},     # Khaki square
+        'customer': {'color': '#FFB6C1', 'shape': 's'},
+        'orchestrator': {'color': '#87CEEB', 'shape': 'o'},
+        'agent': {'color': '#98FB98', 'shape': 'o'},
+        'database': {'color': '#DDA0DD', 'shape': 'd'},
+        'external': {'color': '#F0E68C', 'shape': 's'},
     }
 
     # =========================================================================
-    # ADD NODES - External/Customer Layer
+    # ADD NODES
     # =========================================================================
-    G.add_node("Customer\nRequest", category='customer')
 
-    # =========================================================================
-    # ADD NODES - Orchestrator
-    # =========================================================================
-    G.add_node("Orchestrator\nAgent", category='orchestrator',
+    # External/Customer Layer
+    G.add_node("Customer\nRequest", category='customer', layer=0)
+
+    # Orchestrator Layer
+    G.add_node("Orchestrator\nAgent", category='orchestrator', layer=1,
                description="Receives customer requests\nDelegates tasks to workers\nSynthesizes final response")
 
-    # =========================================================================
-    # ADD NODES - Worker Agents
-    # =========================================================================
-    G.add_node("Inventory\nAgent", category='agent',
-               description="check_stock()\nget_all_inventory()\nget_stock_level()\nassess_restock_needs()")
+    # Worker Agents Layer
+    G.add_node("Inventory\nAgent", category='agent', layer=2,
+               description="check_stock()\nget_all_inventory()\nget_stock_level()")
+    G.add_node("Quoting\nAgent", category='agent', layer=2,
+               description="generate_quote()\nsearch_quote_history()")
+    G.add_node("Order\nFulfillment", category='agent', layer=2,
+               description="process_order()\ncreate_transaction()")
 
-    G.add_node("Quoting\nAgent", category='agent',
-               description="generate_quote()\nsearch_quote_history()\napply_discounts()\nget_supplier_delivery_date()")
+    # Database Layer
+    G.add_node("Transactions\nDB", category='database', layer=3)
+    G.add_node("Inventory\nDB", category='database', layer=3)
+    G.add_node("Quotes\nDB", category='database', layer=3)
+    G.add_node("Quote\nRequests DB", category='database', layer=3)
 
-    G.add_node("Order\nFulfillment", category='agent',
-               description="process_order()\ncreate_transaction()\nupdate_inventory()\ngenerate_financial_report()")
-
-    # =========================================================================
-    # ADD NODES - Database Layer
-    # =========================================================================
-    G.add_node("SQLite DB\n(Transactions)", category='database')
-    G.add_node("SQLite DB\n(Inventory)", category='database')
-    G.add_node("SQLite DB\n(Quotes)", category='database')
-    G.add_node("SQLite DB\n(Quote Requests)", category='database')
+    # External Services
+    G.add_node("LLM\n(GPT-4)", category='external', layer=4)
+    G.add_node("Supplier\nSystem", category='external', layer=4)
 
     # =========================================================================
-    # ADD NODES - External Services
-    # =========================================================================
-    G.add_node("Supplier\nSystem", category='external')
-    G.add_node("LLM\n(GPT-4)", category='external')
-
-    # =========================================================================
-    # ADD EDGES - Data Flow with Labels
+    # DEFINE CUSTOM POSITIONS - Clean layered layout
     # =========================================================================
 
-    # Customer to Orchestrator
-    G.add_edge("Customer\nRequest", "Orchestrator\nAgent",
-               label="1. Customer Inquiry\n    (text request)",
-               color='#8B4513', style='solid')
+    # Layer-based positions with proper spacing
+    pos = {
+        # Layer 0: Customer
+        "Customer\nRequest": (4, 6),
 
-    # Orchestrator to LLM
-    G.add_edge("Orchestrator\nAgent", "LLM\n(GPT-4)",
-               label="2. Analyze intent\n    Extract items/needs",
-               color='#4A90D9', style='dashed')
+        # Layer 1: Orchestrator
+        "Orchestrator\nAgent": (4, 4.5),
 
-    # LLM to Orchestrator
-    G.add_edge("LLM\n(GPT-4)", "Orchestrator\nAgent",
-               label="3. Parsed request\n    (structured data)",
-               color='#4A90D9', style='dashed')
+        # Layer 2: Worker Agents
+        "Inventory\nAgent": (1.5, 2.5),
+        "Quoting\nAgent": (4, 2.5),
+        "Order\nFulfillment": (6.5, 2.5),
 
-    # Orchestrator to Inventory Agent
-    G.add_edge("Orchestrator\nAgent", "Inventory\nAgent",
-               label="4a. Check stock for\n    requested items",
-               color='#2E8B57', style='solid')
+        # Layer 3: Databases
+        "Transactions\nDB": (6.5, 0.5),
+        "Inventory\nDB": (4, 0.5),
+        "Quotes\nDB": (1.5, 0.5),
+        "Quote\nRequests DB": (-1.5, 0.5),
 
-    # Inventory Agent to Inventory DB
-    G.add_edge("Inventory\nAgent", "SQLite DB\n(Inventory)",
-               label="get_all_inventory()\nget_stock_level()",
-               color='#9370DB', style='dotted')
+        # Layer 4: External Services
+        "LLM\n(GPT-4)": (7, 4.5),
+        "Supplier\nSystem": (7, 2.5),
+    }
 
-    # Inventory DB to Inventory Agent
-    G.add_edge("SQLite DB\n(Inventory)", "Inventory\nAgent",
-               label="Current stock levels",
-               color='#9370DB', style='dotted')
+    # =========================================================================
+    # ADD EDGES - Organized by flow type
+    # =========================================================================
 
-    # Orchestrator to Quoting Agent
-    G.add_edge("Orchestrator\nAgent", "Quoting\nAgent",
-               label="4b. Generate quote\n    for request",
-               color='#2E8B57', style='solid')
+    # Main flow edges (solid, thick) - Customer → Orchestrator → Workers
+    main_flow = [
+        ("Customer\nRequest", "Orchestrator\nAgent", "① Customer Inquiry"),
+        ("Orchestrator\nAgent", "Inventory\nAgent", "④a Check Stock"),
+        ("Orchestrator\nAgent", "Quoting\nAgent", "④b Generate Quote"),
+        ("Orchestrator\nAgent", "Order\nFulfillment", "④c Process Order"),
+        ("Order\nFulfillment", "Orchestrator\nAgent", "⑤ Results Return"),
+        ("Orchestrator\nAgent", "Customer\nRequest", "⑥ Final Response"),
+    ]
 
-    # Quoting Agent to Quotes DB
-    G.add_edge("Quoting\nAgent", "SQLite DB\n(Quotes)",
-               label="search_quote_history()",
-               color='#9370DB', style='dotted')
+    # LLM interaction edges (dashed)
+    llm_flow = [
+        ("Orchestrator\nAgent", "LLM\n(GPT-4)", "② Analyze Intent"),
+        ("LLM\n(GPT-4)", "Orchestrator\nAgent", "③ Parsed Data"),
+    ]
 
-    # Quotes DB to Quoting Agent
-    G.add_edge("SQLite DB\n(Quotes)", "Quoting\nAgent",
-               label="Historical pricing",
-               color='#9370DB', style='dotted')
+    # Database edges (dotted)
+    db_flow = [
+        ("Inventory\nAgent", "Inventory\nDB", "get_stock_level()"),
+        ("Inventory\nDB", "Inventory\nAgent", "stock levels"),
+        ("Quoting\nAgent", "Quotes\nDB", "search_quote_history()"),
+        ("Quotes\nDB", "Quoting\nAgent", "historical pricing"),
+        ("Quote\nRequests DB", "Quoting\nAgent", "reference similar"),
+        ("Order\nFulfillment", "Transactions\nDB", "create_transaction()"),
+        ("Transactions\nDB", "Order\nFulfillment", "confirm sale"),
+        ("Order\nFulfillment", "Inventory\nDB", "update stock"),
+    ]
 
-    # Quoting Agent to Supplier System
-    G.add_edge("Quoting\nAgent", "Supplier\nSystem",
-               label="get_supplier_delivery_date()",
-               color='#FF8C00', style='dashed')
+    # Supplier edges
+    supplier_flow = [
+        ("Quoting\nAgent", "Supplier\nSystem", "check delivery"),
+        ("Supplier\nSystem", "Quoting\nAgent", "timeline"),
+    ]
 
-    # Supplier System to Quoting Agent
-    G.add_edge("Supplier\nSystem", "Quoting\nAgent",
-               label="Delivery timeline",
-               color='#FF8C00', style='dashed')
+    # Add all edges with attributes
+    for u, v, label in main_flow:
+        G.add_edge(u, v, label=label, flow_type='main')
 
-    # Orchestrator to Order Fulfillment
-    G.add_edge("Orchestrator\nAgent", "Order\nFulfillment",
-               label="4c. Process order\n    if stock available",
-               color='#2E8B57', style='solid')
+    for u, v, label in llm_flow:
+        G.add_edge(u, v, label=label, flow_type='llm')
 
-    # Order Fulfillment to Transactions DB
-    G.add_edge("Order\nFulfillment", "SQLite DB\n(Transactions)",
-               label="create_transaction()",
-               color='#9370DB', style='dotted')
+    for u, v, label in db_flow:
+        G.add_edge(u, v, label=label, flow_type='db')
 
-    # Order Fulfillment to Inventory DB
-    G.add_edge("Order\nFulfillment", "SQLite DB\n(Inventory)",
-               label="Update stock levels",
-               color='#9370DB', style='dotted')
-
-    # Order Fulfillment to Cash Balance
-    G.add_edge("Order\nFulfillment", "Cash\nBalance",
-               label="get_cash_balance()\ngenerate_financial_report()",
-               color='#9370DB', style='dotted')
-
-    # Cash Balance node
-    G.add_node("Cash\nBalance", category='database')
-
-    # Quote Requests DB to Quoting Agent
-    G.add_edge("SQLite DB\n(Quote Requests)", "Quoting\nAgent",
-               label="Reference previous\nsimilar requests",
-               color='#9370DB', style='dotted')
-
-    # Order Fulfillment to Orchestrator
-    G.add_edge("Order\nFulfillment", "Orchestrator\nAgent",
-               label="5. Order confirmation\n    or rejection reason",
-               color='#2E8B57', style='solid')
-
-    # Orchestrator to Customer
-    G.add_edge("Orchestrator\nAgent", "Customer\nRequest",
-               label="6. Final response\n    (quote/fulfillment)",
-               color='#8B4513', style='solid')
+    for u, v, label in supplier_flow:
+        G.add_edge(u, v, label=label, flow_type='supplier')
 
     # =========================================================================
     # CREATE THE VISUALIZATION
     # =========================================================================
 
-    # Use Graphviz layout if available, otherwise use spring layout
-    try:
-        pos = nx.nx_agraph.graphviz_layout(G, prog='dot')
-    except:
-        # Manual positioned layout for better control
-        pos = {
-            "Customer\nRequest": (0, 4),
-            "Orchestrator\nAgent": (3, 4),
-            "LLM\n(GPT-4)": (6, 5),
-            "Inventory\nAgent": (1, 2),
-            "Quoting\nAgent": (3, 2),
-            "Order\nFulfillment": (5, 2),
-            "SQLite DB\n(Inventory)": (1, 0),
-            "SQLite DB\n(Quotes)": (3, 0),
-            "SQLite DB\n(Transactions)": (5, 0),
-            "SQLite DB\n(Quote Requests)": (7, 0),
-            "Supplier\nSystem": (7, 2),
-            "Cash\nBalance": (5, -1),
-        }
+    fig, ax = plt.subplots(1, 1, figsize=(20, 14))
+    fig.patch.set_facecolor('#F8F9FA')
+    ax.set_facecolor('#F8F9FA')
 
-    # Create figure
-    fig, ax = plt.subplots(1, 1, figsize=(18, 12))
-    fig.patch.set_facecolor('#FAFAFA')
-
-    # Draw nodes by category
-    categories = ['customer', 'orchestrator', 'agent', 'database', 'external']
+    # Node colors
     colors = {
         'customer': '#FFB6C1',
         'orchestrator': '#87CEEB',
@@ -193,60 +152,128 @@ def create_agent_workflow_diagram():
         'external': '#F0E68C'
     }
 
-    for category in categories:
+    # Node sizes
+    node_sizes = {
+        'customer': 4000,
+        'orchestrator': 5000,
+        'agent': 4500,
+        'database': 3500,
+        'external': 3500
+    }
+
+    # Draw nodes by category
+    for category in colors.keys():
         nodes = [n for n, d in G.nodes(data=True) if d.get('category') == category]
         if nodes:
             nx.draw_networkx_nodes(G, pos,
                                    nodelist=nodes,
                                    node_color=colors[category],
-                                   node_size=4500,
-                                   alpha=0.9,
-                                   ax=ax)
+                                   node_size=node_sizes[category],
+                                   alpha=0.95,
+                                   ax=ax,
+                                   node_shape='o',
+                                   edgecolors='black',
+                                   linewidths=2)
 
-    # Draw edges
-    edge_colors = [G.edges[e]['color'] if 'color' in G.edges[e] else '#333333'
-                   for e in G.edges()]
-    edge_styles = [G.edges[e]['style'] if 'style' in G.edges[e] else 'solid'
-                   for e in G.edges()]
+    # Draw edges by type with different styles
+    edge_configs = {
+        'main': {'color': '#2E8B57', 'style': 'solid', 'width': 2.5},
+        'llm': {'color': '#4169E1', 'style': 'dashed', 'width': 1.8},
+        'db': {'color': '#9370DB', 'style': 'dotted', 'width': 1.2},
+        'supplier': {'color': '#FF8C00', 'style': 'dashed', 'width': 1.5},
+    }
 
-    # Convert styles for matplotlib
-    nx.draw_networkx_edges(G, pos,
-                           edge_color='#555555',
-                           arrows=True,
-                           arrowsize=20,
-                           connectionstyle="arc3,rad=0.1",
-                           width=1.5,
-                           alpha=0.7,
-                           ax=ax)
+    # Draw all edges
+    for flow_type, config in edge_configs.items():
+        edges = [(u, v) for u, v, d in G.edges(data=True) if d.get('flow_type') == flow_type]
+        if edges:
+            nx.draw_networkx_edges(G, pos,
+                                   edgelist=edges,
+                                   edge_color=config['color'],
+                                   width=config['width'],
+                                   alpha=0.8,
+                                   ax=ax,
+                                   arrows=True,
+                                   arrowsize=25,
+                                   arrowstyle='-|>',
+                                   connectionstyle="arc3,rad=0.0",
+                                   min_source_margin=35,
+                                   min_target_margin=35)
 
-    # Draw node labels
-    label_pos = {k: (v[0], v[1] + 0.15) for k, v in pos.items()}
+    # Draw node labels with better positioning
+    node_labels = {node: node.replace('\n', '\n') for node in G.nodes()}
     nx.draw_networkx_labels(G, pos,
+                            labels=node_labels,
                             font_size=9,
                             font_weight='bold',
                             font_color='#1a1a1a',
                             ax=ax)
 
-    # Draw edge labels
-    edge_labels = {(u, v): G.edges[u, v].get('label', '')
-                   for u, v in G.edges() if 'label' in G.edges[u, v]}
+    # Draw edge labels with smart positioning
+    # Group labels by position to avoid overlap
+    for u, v, data in G.edges(data=True):
+        label = data.get('label', '')
+        x = (pos[u][0] + pos[v][0]) / 2
+        y = (pos[u][1] + pos[v][1]) / 2
 
-    # Offset edge labels
-    nx.draw_networkx_edge_labels(G, pos,
-                                 edge_labels=edge_labels,
-                                 font_size=7,
-                                 font_color='#333333',
-                                 bbox=dict(boxstyle='round,pad=0.2',
-                                           facecolor='white',
-                                           edgecolor='none',
-                                           alpha=0.8),
-                                 ax=ax)
+        # Adjust label position based on edge direction
+        dx = pos[v][0] - pos[u][0]
+        dy = pos[v][1] - pos[u][1]
+
+        # Offset perpendicular to the edge
+        if abs(dx) > abs(dy):  # More horizontal
+            offset_y = 0.25 if dy >= 0 else -0.25
+            ha = 'center'
+        else:  # More vertical
+            offset_x = 0.3 if dx >= 0 else -0.3
+            ha = 'left' if dx < 0 else 'right'
+
+        # Apply offset
+        if abs(dx) > abs(dy):
+            label_x = x
+            label_y = y + offset_y
+        else:
+            label_x = x + (0.3 if dx >= 0 else -0.3)
+            label_y = y
+
+        ax.annotate(label,
+                   xy=(x, y),
+                   xytext=(label_x, label_y),
+                   fontsize=7,
+                   color='#333333',
+                   ha='center',
+                   va='center',
+                   bbox=dict(boxstyle='round,pad=0.15',
+                            facecolor='white',
+                            edgecolor='#CCCCCC',
+                            alpha=0.9))
+
+    # Add layer labels on the left
+    layer_labels = [
+        (6, "Customer Layer"),
+        (4.5, "Orchestrator"),
+        (2.5, "Worker Agents"),
+        (0.5, "Database Layer"),
+        (3.5, "External Services"),
+    ]
+
+    for y, label in layer_labels:
+        ax.annotate(label,
+                   xy=(-3, y),
+                   fontsize=10,
+                   fontweight='bold',
+                   color='#555555',
+                   ha='right',
+                   va='center',
+                   bbox=dict(boxstyle='round,pad=0.3',
+                            facecolor='#E8E8E8',
+                            edgecolor='none'))
 
     # Add title
-    ax.set_title("Beaver's Choice Paper Company\nMulti-Agent System Architecture",
-                 fontsize=16, fontweight='bold', pad=20)
+    ax.set_title("Beaver's Choice Paper Company - Multi-Agent System Architecture",
+                 fontsize=18, fontweight='bold', pad=25, color='#1a1a1a')
 
-    # Add legend
+    # Create legend
     legend_elements = [
         mpatches.Patch(facecolor='#FFB6C1', edgecolor='black', label='Customer'),
         mpatches.Patch(facecolor='#87CEEB', edgecolor='black', label='Orchestrator Agent'),
@@ -254,34 +281,62 @@ def create_agent_workflow_diagram():
         mpatches.Patch(facecolor='#DDA0DD', edgecolor='black', label='Database Layer'),
         mpatches.Patch(facecolor='#F0E68C', edgecolor='black', label='External Services'),
     ]
-    ax.legend(handles=legend_elements,
-              loc='upper left',
-              fontsize=9,
-              framealpha=0.9,
-              title='Component Types',
-              title_fontsize=10)
 
-    # Add flow number annotations
-    flow_notes = [
-        (1.5, 4.4, "① Customer sends text request"),
-        (4.2, 4.6, "② Orchestrator analyzes via LLM"),
-        (0.8, 3.0, "④a Inventory check"),
-        (2.8, 3.0, "④b Quote generation"),
-        (4.6, 3.0, "④c Order fulfillment"),
-        (2.5, 1.8, "⑤ Results returned to orchestrator"),
-        (1.5, 4.7, "⑥ Final response to customer"),
+    # Add flow type legend
+    flow_legend = [
+        mlines.Line2D([], [], color='#2E8B57', linewidth=2.5, label='Main Flow (Solid)'),
+        mlines.Line2D([], [], color='#4169E1', linewidth=1.8, linestyle='dashed', label='LLM Interaction'),
+        mlines.Line2D([], [], color='#9370DB', linewidth=1.2, linestyle='dotted', label='Database Access'),
+        mlines.Line2D([], [], color='#FF8C00', linewidth=1.5, linestyle='dashed', label='Supplier API'),
     ]
 
-    for x, y, text in flow_notes:
-        ax.annotate(text, xy=(x, y), fontsize=8,
-                    style='italic', color='#444444',
-                    bbox=dict(boxstyle='round,pad=0.3',
-                              facecolor='#ffffcc',
-                              edgecolor='gray',
-                              alpha=0.8))
+    # First legend (node types)
+    legend1 = ax.legend(handles=legend_elements,
+                       loc='upper left',
+                       fontsize=9,
+                       framealpha=0.95,
+                       title='Component Types',
+                       title_fontsize=10,
+                       bbox_to_anchor=(0.01, 0.99))
+    ax.add_artist(legend1)
+
+    # Second legend (flow types)
+    ax.legend(handles=flow_legend,
+              loc='upper left',
+              fontsize=8,
+              framealpha=0.95,
+              title='Data Flow Types',
+              title_fontsize=10,
+              bbox_to_anchor=(0.01, 0.75))
+
+    # Add step annotations on the right side
+    steps = [
+        (5.5, "Step 1: Customer sends text request"),
+        (3.5, "Step 2: Orchestrator analyzes via LLM"),
+        (3.0, "Step 4: Delegates to worker agents"),
+        (5.0, "Step 5: Aggregate results"),
+        (5.0, "Step 6: Return final response"),
+    ]
+
+    for dy, text in steps:
+        ax.annotate(text,
+                   xy=(8.5, dy),
+                   fontsize=8,
+                   style='italic',
+                   color='#666666',
+                   ha='left',
+                   va='center',
+                   bbox=dict(boxstyle='round,pad=0.2',
+                            facecolor='#FFFACD',
+                            edgecolor='#DDD',
+                            alpha=0.9))
 
     # Remove axes
     ax.axis('off')
+
+    # Set axis limits with padding
+    ax.set_xlim(-5, 9.5)
+    ax.set_ylim(-1, 7.5)
 
     # Adjust layout
     plt.tight_layout()
@@ -292,12 +347,11 @@ def create_agent_workflow_diagram():
                 facecolor='white', edgecolor='none')
     print(f"Diagram saved to: {output_path}")
 
-    # Also create a detailed text-based diagram
+    # Generate text diagram
     create_text_diagram()
 
-    plt.show()
-
     return G
+
 
 def create_text_diagram():
     """Generate a detailed text-based architecture document."""
@@ -308,7 +362,7 @@ def create_text_diagram():
 ================================================================================
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                              CUSTOMER LAYER                                   │
+│                              CUSTOMER LAYER                                  │
 │  ┌─────────────────┐                                                         │
 │  │  Customer Req   │ ←── Text-based inquiry (e.g., "I need 500 sheets...")   │
 │  └────────┬────────┘                                                         │
@@ -355,19 +409,19 @@ def create_text_diagram():
 ┌──────────────────────────────┼────────────────────────────────────────────────┐
 │                         DATABASE LAYER                                        │
 │                                                                               │
-│   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
-│   │  Inventory   │  │   Quotes     │  │ Transactions │  │Quote Requests│       │
-│   ├──────────────┤  ├──────────────┤  ├──────────────┤  ├──────────────┤       │
-│   │ current_stock│  │ total_amount│  │ stock_orders│  │   response   │       │
-│   │ min_stock    │  │ quote_      │  │ sales        │  │    job       │       │
-│   │ unit_price   │  │ explanation │  │ units        │  │   event      │       │
-│   │ category     │  │ job_type    │  │ price        │  │              │       │
-│   └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘       │
+│   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐    │
+│   │  Inventory   │  │   Quotes     │  │ Transactions │  │Quote Requests│    │
+│   ├──────────────┤  ├──────────────┤  ├──────────────┤  ├──────────────┤    │
+│   │ current_stock│  │ total_amount │  │ stock_orders │  │   response   │    │
+│   │ min_stock    │  │ quote_       │  │ sales        │  │    job       │    │
+│   │ unit_price   │  │ explanation  │  │ units        │  │   event      │    │
+│   │ category     │  │ job_type     │  │ price        │  │              │    │
+│   └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘    │
 │                                                                               │
-│         ▲                 ▲                  ▲                  ▲              │
-│         │                 │                  │                  │              │
-│   get_stock_level   search_quote    create_transaction  reference            │
-│   get_all_inventory history        generate_financial     data                │
+│         ▲                 ▲                  ▲                  ▲             │
+│         │                 │                  │                  │             │
+│   get_stock_level  search_quote    create_transaction  reference            │
+│   get_all_inventory history       generate_financial     data                │
 │                              _report                                          │
 └────────────────────────────────────────────────────────────────────────────────┘
                                │
@@ -375,18 +429,18 @@ def create_text_diagram():
 │                               │    EXTERNAL SERVICES                           │
 │                               ▼                                                 │
 │                    ┌──────────────────────┐                                    │
-│                    │   Supplier System    │  ← get_supplier_delivery_date()    │
-│                    │  Delivery lead time:  │    ≤10: same day                   │
-│                    │  • 1-10 units: 0d    │    11-100: 1 day                   │
-│                    │  • 11-100 units: 1d   │    101-1000: 4 days                │
-│                    │  • 101-1000 units: 4d │    >1000: 7 days                  │
-│                    │  • >1000 units: 7d    │                                    │
+│                    │   Supplier System    │  ← get_supplier_delivery_date()     │
+│                    │  Delivery lead time: │    ≤10: same day                     │
+│                    │  • 1-10 units: 0d    │    11-100: 1 day                    │
+│                    │  • 11-100 units: 1d  │    101-1000: 4 days                 │
+│                    │  • 101-1000 units: 4d │    >1000: 7 days                   │
+│                    │  • >1000 units: 7d   │                                    │
 │                    └──────────────────────┘                                    │
 │                                                                                │
 │                    ┌──────────────────────┐                                    │
-│                    │   LLM (GPT-4)        │  ← Intent analysis, text generation │
-│                    │   OpenAI API         │    Customer request parsing        │
-│                    └──────────────────────┘    Response synthesis             │
+│                    │   LLM (GPT-4)        │  ← Intent analysis, text gen      │
+│                    │   OpenAI API         │    Customer request parsing         │
+│                    └──────────────────────┘    Response synthesis              │
 └─────────────────────────────────────────────────────────────────────────────────┘
 
 ================================================================================
@@ -421,18 +475,18 @@ Step 6: Orchestrator synthesizes final response → Customer
                            HELPER FUNCTIONS MAPPING
 ================================================================================
 
-┌─────────────────────────────┬───────────────────────────────────────────────┐
-│       Helper Function       │              Usage in Agents                   │
-├─────────────────────────────┼───────────────────────────────────────────────┤
-│ init_database()             │ Initialize DB with inventory & quotes         │
-│ get_all_inventory(date)     │ Inventory Agent: Get all stock levels         │
-│ get_stock_level(item, date) │ Inventory Agent: Check specific item stock     │
-│ get_cash_balance(date)      │ Fulfillment Agent: Verify payment capacity    │
-│ get_supplier_delivery_date() │ Quoting Agent: Estimate delivery lead time   │
-│ search_quote_history(terms) │ Quoting Agent: Find similar historical quotes │
-│ create_transaction(...)     │ Fulfillment Agent: Record sales/stock orders │
-│ generate_financial_report()  │ Fulfillment Agent: Report final state         │
-└─────────────────────────────┴───────────────────────────────────────────────┘
+┌────────────────────────────┬─────────────────────────────────────────────────┐
+│       Helper Function      │              Usage in Agents                    │
+├────────────────────────────┼─────────────────────────────────────────────────┤
+│ init_database()            │ Initialize DB with inventory & quotes          │
+│ get_all_inventory(date)    │ Inventory Agent: Get all stock levels          │
+│ get_stock_level(item, date)│ Inventory Agent: Check specific item stock      │
+│ get_cash_balance(date)     │ Fulfillment Agent: Verify payment capacity   │
+│ get_supplier_delivery_date()│ Quoting Agent: Estimate delivery lead time   │
+│ search_quote_history(terms)│ Quoting Agent: Find similar historical quotes │
+│ create_transaction(...)    │ Fulfillment Agent: Record sales/stock orders │
+│ generate_financial_report()│ Fulfillment Agent: Report final state         │
+└────────────────────────────┴─────────────────────────────────────────────────┘
 
 ================================================================================
                            CONSTRAINTS & REQUIREMENTS
@@ -453,7 +507,6 @@ Step 6: Orchestrator synthesizes final response → Customer
         f.write(text_diagram)
 
     print("Text diagram saved to: agent_architecture_diagram.txt")
-    print(text_diagram)
 
 
 def create_agent_roles_summary():

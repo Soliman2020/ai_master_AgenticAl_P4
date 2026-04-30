@@ -4,7 +4,7 @@
 ================================================================================
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                              CUSTOMER LAYER                                   │
+│                              CUSTOMER LAYER                                  │
 │  ┌─────────────────┐                                                         │
 │  │  Customer Req   │ ←── Text-based inquiry (e.g., "I need 500 sheets...")   │
 │  └────────┬────────┘                                                         │
@@ -51,19 +51,19 @@
 ┌──────────────────────────────┼────────────────────────────────────────────────┐
 │                         DATABASE LAYER                                        │
 │                                                                               │
-│   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
-│   │  Inventory   │  │   Quotes     │  │ Transactions │  │Quote Requests│       │
-│   ├──────────────┤  ├──────────────┤  ├──────────────┤  ├──────────────┤       │
-│   │ current_stock│  │ total_amount│  │ stock_orders│  │   response   │       │
-│   │ min_stock    │  │ quote_      │  │ sales        │  │    job       │       │
-│   │ unit_price   │  │ explanation │  │ units        │  │   event      │       │
-│   │ category     │  │ job_type    │  │ price        │  │              │       │
-│   └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘       │
+│   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐    │
+│   │  Inventory   │  │   Quotes     │  │ Transactions │  │Quote Requests│    │
+│   ├──────────────┤  ├──────────────┤  ├──────────────┤  ├──────────────┤    │
+│   │ current_stock│  │ total_amount │  │ stock_orders │  │   response   │    │
+│   │ min_stock    │  │ quote_       │  │ sales        │  │    job       │    │
+│   │ unit_price   │  │ explanation  │  │ units        │  │   event      │    │
+│   │ category     │  │ job_type     │  │ price        │  │              │    │
+│   └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘    │
 │                                                                               │
-│         ▲                 ▲                  ▲                  ▲              │
-│         │                 │                  │                  │              │
-│   get_stock_level   search_quote    create_transaction  reference            │
-│   get_all_inventory history        generate_financial     data                │
+│         ▲                 ▲                  ▲                  ▲             │
+│         │                 │                  │                  │             │
+│   get_stock_level  search_quote    create_transaction  reference            │
+│   get_all_inventory history       generate_financial     data                │
 │                              _report                                          │
 └────────────────────────────────────────────────────────────────────────────────┘
                                │
@@ -71,18 +71,18 @@
 │                               │    EXTERNAL SERVICES                           │
 │                               ▼                                                 │
 │                    ┌──────────────────────┐                                    │
-│                    │   Supplier System    │  ← get_supplier_delivery_date()    │
-│                    │  Delivery lead time:  │    ≤10: same day                   │
-│                    │  • 1-10 units: 0d    │    11-100: 1 day                   │
-│                    │  • 11-100 units: 1d   │    101-1000: 4 days                │
-│                    │  • 101-1000 units: 4d │    >1000: 7 days                  │
-│                    │  • >1000 units: 7d    │                                    │
+│                    │   Supplier System    │  ← get_supplier_delivery_date()     │
+│                    │  Delivery lead time: │    ≤10: same day                     │
+│                    │  • 1-10 units: 0d    │    11-100: 1 day                    │
+│                    │  • 11-100 units: 1d  │    101-1000: 4 days                 │
+│                    │  • 101-1000 units: 4d │    >1000: 7 days                   │
+│                    │  • >1000 units: 7d   │                                    │
 │                    └──────────────────────┘                                    │
 │                                                                                │
 │                    ┌──────────────────────┐                                    │
-│                    │   LLM (GPT-4)        │  ← Intent analysis, text generation │
-│                    │   OpenAI API         │    Customer request parsing        │
-│                    └──────────────────────┘    Response synthesis             │
+│                    │   LLM (GPT-4)        │  ← Intent analysis, text gen      │
+│                    │   OpenAI API         │    Customer request parsing         │
+│                    └──────────────────────┘    Response synthesis              │
 └─────────────────────────────────────────────────────────────────────────────────┘
 
 ================================================================================
@@ -117,18 +117,18 @@ Step 6: Orchestrator synthesizes final response → Customer
                            HELPER FUNCTIONS MAPPING
 ================================================================================
 
-┌─────────────────────────────┬───────────────────────────────────────────────┐
-│       Helper Function       │              Usage in Agents                   │
-├─────────────────────────────┼───────────────────────────────────────────────┤
-│ init_database()             │ Initialize DB with inventory & quotes         │
-│ get_all_inventory(date)     │ Inventory Agent: Get all stock levels         │
-│ get_stock_level(item, date) │ Inventory Agent: Check specific item stock     │
-│ get_cash_balance(date)      │ Fulfillment Agent: Verify payment capacity    │
-│ get_supplier_delivery_date() │ Quoting Agent: Estimate delivery lead time   │
-│ search_quote_history(terms) │ Quoting Agent: Find similar historical quotes │
-│ create_transaction(...)     │ Fulfillment Agent: Record sales/stock orders │
-│ generate_financial_report()  │ Fulfillment Agent: Report final state         │
-└─────────────────────────────┴───────────────────────────────────────────────┘
+┌────────────────────────────┬─────────────────────────────────────────────────┐
+│       Helper Function      │              Usage in Agents                    │
+├────────────────────────────┼─────────────────────────────────────────────────┤
+│ init_database()            │ Initialize DB with inventory & quotes          │
+│ get_all_inventory(date)    │ Inventory Agent: Get all stock levels          │
+│ get_stock_level(item, date)│ Inventory Agent: Check specific item stock      │
+│ get_cash_balance(date)     │ Fulfillment Agent: Verify payment capacity   │
+│ get_supplier_delivery_date()│ Quoting Agent: Estimate delivery lead time   │
+│ search_quote_history(terms)│ Quoting Agent: Find similar historical quotes │
+│ create_transaction(...)    │ Fulfillment Agent: Record sales/stock orders │
+│ generate_financial_report()│ Fulfillment Agent: Report final state         │
+└────────────────────────────┴─────────────────────────────────────────────────┘
 
 ================================================================================
                            CONSTRAINTS & REQUIREMENTS
