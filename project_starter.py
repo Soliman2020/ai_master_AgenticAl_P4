@@ -598,22 +598,373 @@ def search_quote_history(search_terms: List[str], limit: int = 5) -> List[Dict]:
 
 
 # Set up and load your env parameters and instantiate your model.
+openai_client = OpenAI(api_key=openai_api_key, base_url="https://openai.vocareum.com/v1")
 
 
 """Set up tools for your agents to use, these should be methods that combine the database functions above
  and apply criteria to them to ensure that the flow of the system is correct."""
 
 
+# Item name mapping for natural language to exact item names
+ITEM_MAPPING = {
+    "glossy paper": "Glossy paper",
+    "a4 glossy paper": "Glossy paper",
+    "glossy a4 paper": "Glossy paper",
+    "cardstock": "Cardstock",
+    "heavy cardstock": "Cardstock",
+    "heavyweight cardstock": "Cardstock",
+    "colored paper": "Colored paper",
+    "assorted colored paper": "Colored paper",
+    "colorful poster paper": "Poster paper",
+    "poster paper": "Poster paper",
+    " streamers": "Party streamers",
+    "streamers": "Party streamers",
+    "washi tape": "Decorative adhesive tape (washi tape)",
+    "decorative washi tape": "Decorative adhesive tape (washi tape)",
+    "construction paper": "Construction paper",
+    "colorful construction paper": "Construction paper",
+    "a4 paper": "A4 paper",
+    "a4 printer paper": "A4 paper",
+    "a4 white printer paper": "A4 paper",
+    "a4 white paper": "A4 paper",
+    "printer paper": "Standard copy paper",
+    "standard printer paper": "Standard copy paper",
+    "standard printing paper": "Standard copy paper",
+    "white printer paper": "Standard copy paper",
+    "white printer paper": "Standard copy paper",
+    "matte paper": "Matte paper",
+    "a4 matte paper": "Matte paper",
+    "a3 matte paper": "Matte paper",
+    "recycled paper": "Recycled paper",
+    "a4 recycled paper": "Recycled paper",
+    "recycled cardstock": "Recycled paper",
+    "kraft paper": "Kraft paper",
+    "recycled kraft paper": "Kraft paper",
+    "envelopes": "Envelopes",
+    "kraft envelopes": "Envelopes",
+    "napkins": "Paper napkins",
+    "paper napkins": "Paper napkins",
+    "table napkins": "Paper napkins",
+    "paper cups": "Paper cups",
+    "disposable cups": "Disposable cups",
+    "paper plates": "Paper plates",
+    "poster board": "Large poster paper (24x36 inches)",
+    "poster boards": "Large poster paper (24x36 inches)",
+    "heavyweight paper": "Heavyweight paper",
+    "flyers": "Flyers",
+    "posters": "Flyers",
+    "tickets": "Flyers",
+}
+
+
+def normalize_item_name(requested_item: str) -> str:
+    """Map natural language item names to exact item names in the database."""
+    requested_lower = requested_item.lower().strip()
+
+    # Direct mapping
+    if requested_lower in ITEM_MAPPING:
+        return ITEM_MAPPING[requested_lower]
+
+    # Partial matching for compound names
+    for key, value in ITEM_MAPPING.items():
+        if key in requested_lower or requested_lower in key:
+            return value
+
+    # Try to find in paper_supplies directly
+    for item in paper_supplies:
+        if item["item_name"].lower() in requested_lower or requested_lower in item["item_name"].lower():
+            return item["item_name"]
+
+    return requested_item.title()
+
+
 # Tools for inventory agent
+def check_inventory(agent_date: str) -> Dict[str, int]:
+    """Get current inventory levels."""
+    return get_all_inventory(agent_date)
+
+
+def check_specific_item_stock(item_name: str, agent_date: str) -> int:
+    """Check stock level for a specific item."""
+    result = get_stock_level(item_name, agent_date)
+    return int(result["current_stock"].iloc[0]) if not result.empty else 0
+
+
+def check_item_available(item_name: str, quantity: int, agent_date: str) -> bool:
+    """Check if item is available in requested quantity."""
+    stock = check_specific_item_stock(item_name, agent_date)
+    return stock >= quantity
 
 
 # Tools for quoting agent
+def get_unit_price(item_name: str) -> float:
+    """Get unit price for an item from paper_supplies."""
+    for item in paper_supplies:
+        if item["item_name"].lower() == item_name.lower():
+            return item["unit_price"]
+    return 0.0
 
 
-# Tools for ordering agent
+def calculate_quote(item_requests: List[Dict], agent_date: str) -> Dict:
+    """Calculate quote for requested items with delivery estimate."""
+    items_quoted = []
+    total_amount = 0.0
+
+    for req in item_requests:
+        item_name = normalize_item_name(req["item_name"])
+        quantity = req["quantity"]
+        unit_price = get_unit_price(item_name)
+
+        if unit_price > 0:
+            item_total = unit_price * quantity
+            total_amount += item_total
+            items_quoted.append({
+                "item_name": item_name,
+                "requested_quantity": quantity,
+                "unit_price": unit_price,
+                "item_total": item_total,
+            })
+
+    # Apply bulk discount (10% off orders over $500)
+    discount = 0.0
+    discount_explanation = ""
+    if total_amount > 500:
+        discount = total_amount * 0.10
+        discount_explanation = "10% bulk discount applied (order > $500)"
+        total_amount -= discount
+
+    delivery_date = get_supplier_delivery_date(agent_date, sum(r["quantity"] for r in item_requests))
+
+    return {
+        "items": items_quoted,
+        "subtotal": total_amount + discount,
+        "discount": discount,
+        "discount_explanation": discount_explanation,
+        "total_amount": total_amount,
+        "estimated_delivery": delivery_date,
+    }
 
 
-# Set up your agents and create an orchestration agent that will manage them.
+def find_similar_quotes(search_terms: List[str]) -> List[Dict]:
+    """Search historical quotes for similar requests."""
+    return search_quote_history(search_terms, limit=3)
+
+
+# Tools for fulfillment agent
+def process_order(item_requests: List[Dict], quote_result: Dict, agent_date: str) -> Dict:
+    """Process the order by creating sales transactions."""
+    fulfilled_items = []
+    failed_items = []
+
+    for req in item_requests:
+        item_name = normalize_item_name(req["item_name"])
+        quantity = req["quantity"]
+
+        # Check stock
+        stock = check_specific_item_stock(item_name, agent_date)
+
+        if stock >= quantity:
+            # Create sales transaction
+            unit_price = get_unit_price(item_name)
+            total_price = unit_price * quantity
+
+            create_transaction(
+                item_name=item_name,
+                transaction_type="sales",
+                quantity=quantity,
+                price=total_price,
+                date=agent_date,
+            )
+
+            fulfilled_items.append({
+                "item_name": item_name,
+                "quantity": quantity,
+                "total_price": total_price,
+            })
+        else:
+            failed_items.append({
+                "item_name": item_name,
+                "requested": quantity,
+                "available": stock,
+                "reason": f"Insufficient stock (available: {stock})",
+            })
+
+    return {
+        "fulfilled_items": fulfilled_items,
+        "failed_items": failed_items,
+        "total_fulfilled_value": sum(i["total_price"] for i in fulfilled_items),
+    }
+
+
+def process_restock_order(item_name: str, quantity: int, agent_date: str) -> int:
+    """Create a stock order transaction for restocking."""
+    unit_price = get_unit_price(item_name)
+    total_price = unit_price * quantity
+
+    return create_transaction(
+        item_name=item_name,
+        transaction_type="stock_orders",
+        quantity=quantity,
+        price=total_price,
+        date=agent_date,
+    )
+
+
+# ==================== AGENT CLASSES ====================
+
+class InventoryAgent:
+    """Agent responsible for inventory management and stock checks."""
+
+    def __init__(self):
+        self.name = "Inventory Agent"
+
+    def check_stock(self, item_name: str, agent_date: str) -> Dict:
+        """Check if item is in stock and at what quantity."""
+        normalized = normalize_item_name(item_name)
+        stock = check_specific_item_stock(normalized, agent_date)
+        return {
+            "item": normalized,
+            "current_stock": stock,
+            "available": stock > 0,
+        }
+
+    def check_multiple_items(self, items: List[str], agent_date: str) -> List[Dict]:
+        """Check stock for multiple items."""
+        results = []
+        for item in items:
+            results.append(self.check_stock(item, agent_date))
+        return results
+
+
+class QuotingAgent:
+    """Agent responsible for generating price quotes."""
+
+    def __init__(self):
+        self.name = "Quoting Agent"
+
+    def generate_quote(self, item_requests: List[Dict], agent_date: str) -> Dict:
+        """Generate a quote for requested items."""
+        return calculate_quote(item_requests, agent_date)
+
+    def find_reference_quotes(self, search_terms: List[str]) -> List[Dict]:
+        """Find similar historical quotes."""
+        return find_similar_quotes(search_terms)
+
+
+class FulfillmentAgent:
+    """Agent responsible for order fulfillment and transactions."""
+
+    def __init__(self):
+        self.name = "Fulfillment Agent"
+
+    def fulfill_order(self, item_requests: List[Dict], agent_date: str) -> Dict:
+        """Process and fulfill the order."""
+        return process_order(item_requests, {}, agent_date)
+
+    def restock_item(self, item_name: str, quantity: int, agent_date: str) -> int:
+        """Create a restock order for an item."""
+        normalized = normalize_item_name(item_name)
+        return process_restock_order(normalized, quantity, agent_date)
+
+
+class OrchestratorAgent:
+    """Central coordinator that analyzes requests and dispatches to worker agents."""
+
+    def __init__(self):
+        self.inventory_agent = InventoryAgent()
+        self.quoting_agent = QuotingAgent()
+        self.fulfillment_agent = FulfillmentAgent()
+        self.name = "Orchestrator Agent"
+
+    def parse_request(self, request_text: str) -> List[Dict]:
+        """Use LLM to parse the natural language request into structured items."""
+        prompt = f"""Parse this paper supply request into a list of items with quantities.
+Return ONLY a JSON array of objects with 'item_name' and 'quantity' keys.
+Example: [{{"item_name": "A4 glossy paper", "quantity": 200}}, {{"item_name": "cardstock", "quantity": 100}}]
+
+Request:
+{request_text}
+
+Respond with ONLY the JSON array, no other text."""
+
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+        )
+
+        import json
+        try:
+            items = json.loads(response.choices[0].message.content)
+            return items
+        except:
+            return []
+
+    def process_request(self, request_text: str, agent_date: str) -> str:
+        """Process a customer request through the multi-agent system."""
+
+        # Step 1: Parse the request into items
+        parsed_items = self.parse_request(request_text)
+        if not parsed_items:
+            return "I apologize, but I couldn't understand your request. Please provide the items and quantities clearly."
+
+        # Step 2: Check inventory for each item
+        inventory_report = []
+        for item in parsed_items:
+            stock_info = self.inventory_agent.check_stock(item["item_name"], agent_date)
+            inventory_report.append(stock_info)
+
+        # Step 3: Generate quote
+        quote = self.quoting_agent.generate_quote(parsed_items, agent_date)
+
+        # Step 4: Attempt fulfillment
+        fulfillment = self.fulfillment_agent.fulfill_order(parsed_items, agent_date)
+
+        # Step 5: Build response
+        response_parts = []
+
+        # Quote information
+        response_parts.append("QUOTE SUMMARY:")
+        for item in quote["items"]:
+            response_parts.append(
+                f"  - {item['item_name']}: {item['requested_quantity']} x ${item['unit_price']:.2f} = ${item['item_total']:.2f}"
+            )
+
+        if quote["discount"] > 0:
+            response_parts.append(f"  Discount: ${quote['discount']:.2f} ({quote['discount_explanation']})")
+
+        response_parts.append(f"  TOTAL: ${quote['total_amount']:.2f}")
+        response_parts.append(f"  Estimated Delivery: {quote['estimated_delivery']}")
+
+        # Fulfillment status
+        if fulfillment["fulfilled_items"]:
+            response_parts.append("\nORDER FULFILLED:")
+            for item in fulfillment["fulfilled_items"]:
+                response_parts.append(f"  - {item['item_name']}: {item['quantity']} units (${item['total_price']:.2f})")
+
+        if fulfillment["failed_items"]:
+            response_parts.append("\nCOULD NOT FULFILL:")
+            for item in fulfillment["failed_items"]:
+                response_parts.append(f"  - {item['item_name']}: {item['reason']}")
+
+        # Auto-restock low items (if stock < 100)
+        restocked = []
+        for item_info in inventory_report:
+            if item_info["current_stock"] < 100:
+                restock_qty = 500
+                self.fulfillment_agent.restock_item(item_info["item"], restock_qty, agent_date)
+                restocked.append((item_info["item"], restock_qty))
+
+        if restocked:
+            response_parts.append("\nAUTO-RESTOCKED (low stock):")
+            for item, qty in restocked:
+                response_parts.append(f"  - {item}: +{qty} units")
+
+        return "\n".join(response_parts)
+
+
+# Instantiate the orchestrator
+orchestrator = OrchestratorAgent()
 
 
 # Run your test scenarios by writing them here. Make sure to keep track of them.
@@ -668,7 +1019,7 @@ def run_test_scenarios():
         ############
         ############
 
-        # response = call_your_multi_agent_system(request_with_date)
+        response = orchestrator.process_request(row['request'], request_date)
 
         # Update state
         report = generate_financial_report(request_date)
