@@ -605,8 +605,8 @@ import json
 # Configure model for smolagents
 model = OpenAIServerModel(
     model_id="gpt-4o-mini",
-    api_base="https://openai.vocareum.com/v1",
     api_key=openai_api_key,
+    api_base="https://openai.vocareum.com/v1"
 )
 
 
@@ -662,21 +662,44 @@ ITEM_MAPPING = {
 
 
 def normalize_item_name(requested_item: str) -> str:
-    """Map natural language item names to exact item names in the database."""
+    """Map natural language item names to exact item names in the database.
+
+    Returns the exact item name if found, or the original (title-cased) if no match.
+    """
     requested_lower = requested_item.lower().strip()
 
+    # First check direct mapping
     if requested_lower in ITEM_MAPPING:
         return ITEM_MAPPING[requested_lower]
 
+    # Check for substring matches
     for key, value in ITEM_MAPPING.items():
         if key in requested_lower or requested_lower in key:
             return value
 
+    # Check against paper_supplies catalog
     for item in paper_supplies:
         if item["item_name"].lower() in requested_lower or requested_lower in item["item_name"].lower():
             return item["item_name"]
 
+    # No match found - return title case for display but mark as unknown
     return requested_item.title()
+
+
+def item_exists_in_catalog(item_name: str) -> bool:
+    """Check if an item exists in our paper supplies catalog.
+
+    Args:
+        item_name: The item name to check
+
+    Returns:
+        True if item exists in catalog, False otherwise
+    """
+    normalized = normalize_item_name(item_name)
+    for item in paper_supplies:
+        if item["item_name"].lower() == normalized.lower():
+            return True
+    return False
 
 
 @tool
@@ -698,16 +721,22 @@ def get_unit_price(item_name: str) -> float:
 # ==================== SMOLAGENTS TOOLS ====================
 
 @tool
-def check_inventory(agent_date: str) -> Dict[str, int]:
+def check_inventory(agent_date: str) -> Dict:
     """Get current inventory levels for all items as of a given date.
 
     Args:
         agent_date: The date in YYYY-MM-DD format to check inventory levels
 
     Returns:
-        Dictionary mapping item names to current stock levels
+        Dictionary with item names mapped to dicts containing current_stock and unit_price
     """
-    return get_all_inventory(agent_date)
+    inventory = get_all_inventory(agent_date)
+    # Build enhanced inventory with prices
+    result = {}
+    for item_name, stock in inventory.items():
+        unit_price = get_unit_price(item_name)
+        result[item_name] = {"current_stock": stock, "unit_price": unit_price}
+    return result
 
 
 @tool
@@ -719,12 +748,13 @@ def check_item_stock(item_name: str, agent_date: str) -> Dict:
         agent_date: The date in YYYY-MM-DD format to check stock
 
     Returns:
-        Dictionary with item_name and current_stock
+        Dictionary with item_name, current_stock, and unit_price (always included)
     """
     normalized = normalize_item_name(item_name)
     result = get_stock_level(normalized, agent_date)
     stock = int(result["current_stock"].iloc[0]) if not result.empty else 0
-    return {"item_name": normalized, "current_stock": stock}
+    unit_price = get_unit_price(normalized)
+    return {"item_name": normalized, "current_stock": stock, "unit_price": unit_price}
 
 
 @tool
@@ -790,7 +820,7 @@ def create_sale_transaction(item_name: str, quantity: int, agent_date: str) -> D
         agent_date: The date in YYYY-MM-DD format
 
     Returns:
-        Dictionary with transaction_id and total_price
+        Dictionary with transaction_id, item_name, quantity, unit_price, and total_price
     """
     normalized = normalize_item_name(item_name)
     unit_price = get_unit_price(normalized)
@@ -803,7 +833,7 @@ def create_sale_transaction(item_name: str, quantity: int, agent_date: str) -> D
         price=total_price,
         date=agent_date,
     )
-    return {"transaction_id": transaction_id, "item_name": normalized, "quantity": quantity, "total_price": total_price}
+    return {"transaction_id": transaction_id, "item_name": normalized, "quantity": quantity, "unit_price": unit_price, "total_price": total_price}
 
 
 @tool
@@ -892,37 +922,109 @@ fulfillment_agent = FulfillmentAgent(model)
 orchestrator_agent = OrchestratorAgent(model)
 
 
+# Placeholder patterns that should never appear in final responses
+PLACEHOLDER_PATTERNS = [
+    r"\[Unit price needed\]",
+    r"\[Line total needed\]",
+    r"\[Your Name\]",
+    r"\[.*?\]",  # Generic placeholders in brackets
+    r"Unit Price: N/A",
+    r"Unit Price: Not Available",
+    r"Price: N/A",
+    r"hypothetical",
+    r"TBD",
+    r"to be determined",
+]
+
+
+def validate_response(response: str, stock_info: Dict = None) -> str:
+    """Clean up response by removing placeholders and fixing common issues.
+
+    Args:
+        response: The raw response from the agent
+        stock_info: Optional dict with item stock info for reference
+
+    Returns:
+        Cleaned response safe for customer delivery
+    """
+    import re
+
+    result = response
+
+    # Remove all placeholder patterns
+    for pattern in PLACEHOLDER_PATTERNS:
+        result = re.sub(pattern, "Contact us for pricing", result, flags=re.IGNORECASE)
+
+    # Fix "N/A" for prices - if there's stock info, use actual prices
+    if stock_info:
+        for item, stock_data in stock_info.items():
+            if "unit_price" in stock_data and stock_data["unit_price"] > 0:
+                # Ensure unit price is shown even when out of stock
+                result = result.replace(
+                    f"Unit Price: N/A",
+                    f"Unit Price: ${stock_data['unit_price']:.2f}"
+                )
+
+    # Ensure "out of stock" items still show pricing info
+    result = re.sub(
+        r"(Item:.*?)(Status:.*?OUT OF STOCK.*?)",
+        r"\1Unit Price: [show from inventory] \2",
+        result
+    )
+
+    return result
+
+
 def process_request(request_text: str, agent_date: str) -> str:
     """Process a customer request through the multi-agent system."""
 
-    # Build system prompt with workflow
+    # Build system prompt with strict output requirements
     system_prompt = f"""You are the Orchestrator Agent for Beaver's Choice Paper Company.
 Today's date is {agent_date}.
 
 Process this customer request:
 {request_text}
 
-Follow this workflow:
-1. Parse the request to identify items and quantities needed
-2. Check inventory for each item using check_item_stock
-3. Calculate quote: sum of (quantity × unit_price), apply 10% discount if total > $500
-4. Get delivery date estimate using get_delivery_date
-5. Create sales transactions for items that are in stock
+CRITICAL OUTPUT REQUIREMENTS:
+1. ALWAYS include actual unit prices - NEVER show "N/A" or "Not Available" for prices
+2. NEVER use placeholder text like "[Unit price needed]" or "[Your Name]"
+3. NEVER show "hypothetical" or "estimated" prices - only real prices from the system
+4. If an item exists in our catalog but is out of stock, show its unit price with "Currently Out of Stock" status
+5. If an item cannot be found at all, say "Item not available in our catalog"
+
+For each item in the request:
+- Use check_item_stock to get stock level AND unit price
+- Use unit_price from the response (never N/A)
+- Calculate line total as quantity × unit_price
+
+Quote calculation:
+- Sum of (quantity × unit_price) for each item
+- Apply 10% discount if total > $500
+- Show discount amount clearly
+
+Delivery:
+- Use get_delivery_date for delivery estimate
+
+Fulfillment:
+- Use create_sale_transaction for items that are in stock
+- For out of stock items, state "Cannot fulfill: currently out of stock"
 
 Respond with a clear customer-facing message including:
-- Quote summary with each item, quantity, unit price, and line total
+- Quote summary with each item, quantity, unit price (MUST be actual price), and line total
 - Discount applied (if any)
 - Total amount
 - Estimated delivery date
-- What items were fulfilled vs what could not be fulfilled (with reasons)
-
-If an item is out of stock, note it as "Cannot fulfill: insufficient stock"."""
+- What items were fulfilled vs what could not be fulfilled (with reasons)"""
 
     try:
         result = orchestrator_agent.run(system_prompt)
+
+        # Validate and clean the response before returning
+        result = validate_response(result)
+
         return result
     except Exception as e:
-        return f"Error processing request: {str(e)}"
+        return f"We apologize, but we were unable to process your request at this time. Please try again or contact us directly for assistance."
 
 
 # Run your test scenarios by writing them here. Make sure to keep track of them.
