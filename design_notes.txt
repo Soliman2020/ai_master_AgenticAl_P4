@@ -1,0 +1,132 @@
+================================================================================
+                     BEAVER'S CHOICE PAPER COMPANY
+                      MULTI-AGENT SYSTEM DESIGN NOTES
+================================================================================
+
+OVERVIEW
+--------
+The system uses smolagents to create a multi-agent workflow for a paper supply
+company. Customers send text requests for paper supplies, and the system
+processes them through a coordinated agent architecture.
+
+
+AGENT ARCHITECTURE
+------------------
+
+The system defines 4 agents using the ToolCallingAgent class:
+
+1. INVENTORY AGENT
+   - Purpose: Check stock levels and assess restock needs
+   - Tools: check_inventory, check_item_stock, get_delivery_date, create_stock_order
+
+2. QUOTING AGENT
+   - Purpose: Generate price quotes with discounts and delivery estimates
+   - Tools: get_unit_price, get_delivery_date, search_historical_quotes
+
+3. FULFILLMENT AGENT
+   - Purpose: Process orders and update sales transactions
+   - Tools: create_sale_transaction, check_item_stock
+
+4. ORCHESTRATOR AGENT (Main)
+   - Purpose: Coordinate all other agents and handle customer requests
+   - Tools: All tools from inventory, quoting, and fulfillment agents
+
+
+MODEL CONFIGURATION
+-------------------
+
+The system uses OpenAIServerModel with the Vocareum proxy:
+
+    model = OpenAIServerModel(
+        model_id="gpt-4o-mini",
+        api_base="https://openai.vocareum.com/v1",
+        api_key=openai_api_key,
+    )
+
+Note: Use "api_base" not "base_url" - the latter causes an error with smolagents.
+
+
+TOOL DEFINITION
+---------------
+
+All tools must be decorated with @tool and include proper docstrings:
+
+    @tool
+    def check_item_stock(item_name: str, agent_date: str) -> Dict:
+        """Check the stock level for a specific item.
+
+        Args:
+            item_name: The name of the item to check
+            agent_date: The date in YYYY-MM-DD format to check stock
+
+        Returns:
+            Dictionary with item_name and current_stock
+        """
+        ...
+
+The docstring MUST include an Args: section for each parameter, otherwise
+smolagents will raise a DocstringParsingException.
+
+
+PROCESSING FLOW
+---------------
+
+When a customer request comes in:
+
+1. The request is passed to process_request() along with the date
+2. A system prompt is built with instructions for the Orchestrator
+3. orchestrator_agent.run(system_prompt) is called
+4. The agent uses tools as needed to fulfill the request
+5. Results are returned to the customer
+
+The system prompt instructs the agent to:
+1. Parse the request to identify items and quantities
+2. Check inventory for each item using check_item_stock
+3. Calculate quote: sum of (quantity x unit_price), apply 10% discount if > $500
+4. Get delivery date estimate using get_delivery_date
+5. Create sales transactions for items in stock
+
+
+DATABASE LAYER
+--------------
+
+The system uses SQLite (paper_company_db.db) with these tables:
+
+- inventory: current stock levels per item
+- transactions: logs stock_orders and sales with dates
+- quotes: historical quote data with explanations
+- quote_requests: incoming customer inquiries
+
+Utility functions:
+- get_all_inventory(date): Returns dict of {item_name: stock}
+- get_stock_level(item, date): Returns DataFrame with current_stock
+- get_cash_balance(date): Returns float cash position
+- get_supplier_delivery_date(date, qty): Estimates delivery based on quantity
+- search_quote_history(terms, limit): Searches historical quotes
+- create_transaction(item, type, qty, price, date): Records transactions
+- generate_financial_report(date): Returns cash, inventory_value, total_assets
+
+
+DELIVERY LEAD TIMES
+-------------------
+
+Supplier delivery is deterministic based on quantity:
+- 1-10 units: Same day
+- 11-100 units: 1 day
+- 101-1000 units: 4 days
+- 1000+ units: 7 days
+
+
+TESTING
+-------
+
+Run test scenarios with:
+    python project_starter.py
+
+This processes quote_requests_sample.csv and outputs results to test_results.csv.
+The system should demonstrate:
+- At least 3 requests with cash balance changes
+- At least 3 successfully fulfilled quote requests
+- Some requests not fulfilled (insufficient stock, etc.)
+
+================================================================================
